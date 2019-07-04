@@ -2,3 +2,6 @@
 An F1 2018 Telemetry App for mobile devices using Unity
 
 Requires https://github.com/btastic/F1Telemetry - will probably fork his project to debug issues with Android builds not receiving all packets.
+
+Example of the display (without values):
+[Screen](https://i.imgur.com/mJCeumG.png)

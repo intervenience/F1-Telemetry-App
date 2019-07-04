@@ -12,7 +12,9 @@ using UnityEngine.UI;
 using F1Telemetry.Models.Raw.F12018;
 using F1Telemetry.Events;
 using F1Telemetry.Manager;
+using Format2018;
 
+//https://forums.codemasters.com/topic/38920-f1-2019-udp-specification/
 public class Telemetry : MonoBehaviour
 {
     [Header ("Set up")]
@@ -41,12 +43,18 @@ public class Telemetry : MonoBehaviour
     F1Telemetry.Manager.TelemetryRecorder tr;
     F1Telemetry.Manager.TelemetryManager tm;
     F1Telemetry.Manager.F1Manager f1Manager;
+    UdpListener udpListener;
 
-    CarStatusData c;
-    CarTelemetryData ctd;
-    LapData l;
-    PacketSessionData psd;
-    CarSetupData cs;
+    Format2018.CarStatusData c;
+    Format2018.PacketCarTelemetryData ctd;
+    Format2018.PacketLapData l;
+    Format2018.PacketSessionData psd;
+    Format2018.PacketCarSetupData cs;
+    //F1Telemetry.Models.Raw.F12018.CarStatusData c;
+    //F1Telemetry.Models.Raw.F12018.CarTelemetryData ctd;
+    //F1Telemetry.Models.Raw.F12018.LapData l;
+    //F1Telemetry.Models.Raw.F12018.PacketSessionData psd;
+    //F1Telemetry.Models.Raw.F12018.CarSetupData cs;
 
     float maxERS = 0;
     float maxHarvest = 0;
@@ -56,7 +64,10 @@ public class Telemetry : MonoBehaviour
 
     void Start () {
 #if (!UNITY_WEBGL)
-        helpText.text = string.Format ("Your local IP address is {0}\nIn F1 2018, ensure you've disabled UDP broadcast, and set the target IP address to the IP above.\nThe higher the frequency of data transmission, the more accurate the values will be on this screen.\nThis will still be limited by the refresh rate of your device.", GetLocalIP ());
+        helpText.text = string.Format ("Your local IP address is {0}\n" +
+            "In F1 2018, ensure you've disabled UDP broadcast, and set the target IP address to the IP above.\n" +
+            "The higher the frequency of data transmission, the more accurate the values will be on this screen.\n" +
+            "This will still be limited by the refresh rate of your device.", GetLocalIP ());
 #endif
         
         initialScreen.SetActive (true);
@@ -71,6 +82,7 @@ public class Telemetry : MonoBehaviour
         //lower frame rate on mobile devices, it's unnecessary to run at higher fps.
 #if (UNITY_ANDROID || UNITY_IOS)
             Application.targetFrameRate = 45;
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
 #endif
 
         box.SetActive (false);
@@ -83,18 +95,14 @@ public class Telemetry : MonoBehaviour
     }
 
     void OnDisable () {
-        f1Manager.SessionPacketReceived -= F1Manager_SessionPacketReceived;
+        /*f1Manager.SessionPacketReceived -= F1Manager_SessionPacketReceived;
         f1Manager.LapPacketReceived -= F1Manager_LapPacketReceived;
         f1Manager.CarTelemetryReceived -= F1Manager_CarTelemetryReceived;
         f1Manager.CarStatusReceived -= F1Manager_CarStatusReceived;
-        tm.CarSetupPacketReceived -= Tm_CarSetupPacketReceived;
-        tm.CarStatusPacketReceived -= Tm_CarStatusPacketReceived;
+        tm.CarSetupPacketReceived -= Tm_CarSetupPacketReceived;*/
         Debug.Log ("On disable");
-    }
-
-    void FixedUpdate () {
-        f1Manager.CarStatusReceived += F1Manager_CarStatusReceived;
-        tm.CarStatusPacketReceived += Tm_CarStatusPacketReceived;
+        udpListener.SessionPacketReceived -= UdpListener_SessionPacketReceived;
+        udpListener.StatusPacketReceived -= UdpListener_StatusPacketReceived;
     }
 
     public void StartTelemetryButtonPress () {
@@ -102,28 +110,82 @@ public class Telemetry : MonoBehaviour
         initialScreen.SetActive (false);
         telemetryScreen.SetActive (true);
 
-        tr = new TelemetryRecorder ();
+        /*tr = new TelemetryRecorder ();
         tm = new TelemetryManager (tr);
         f1Manager = new F1Manager (tm);
         Debug.Log ("Update interval " + f1Manager.UpdateInterval);
         f1Manager.CarStatusReceived += F1Manager_CarStatusReceived;
-        tm.CarStatusPacketReceived += Tm_CarStatusPacketReceived;
         Debug.Log ("Car status set up");
         f1Manager.SessionPacketReceived += F1Manager_SessionPacketReceived;
         f1Manager.LapPacketReceived += F1Manager_LapPacketReceived;
         f1Manager.CarTelemetryReceived += F1Manager_CarTelemetryReceived;
         
-        tm.CarSetupPacketReceived += Tm_CarSetupPacketReceived;
+        tm.CarSetupPacketReceived += Tm_CarSetupPacketReceived;*/
+        udpListener = new UdpListener ();
+        udpListener.SessionPacketReceived += UdpListener_SessionPacketReceived;
+        udpListener.StatusPacketReceived += UdpListener_StatusPacketReceived;
         ready = true;
     }
 
-    void Tm_CarStatusPacketReceived (object sender, PacketReceivedEventArgs<PacketCarStatusData> e) {
-        Debug.Log ("tm car status packet received");
+    private void UdpListener_StatusPacketReceived (object sender, StatusPacketReceivedEventArgs e) {
+        Debug.Log ("Status packet received");
+        c = e.PacketCarStatusData.carStatusData [e.PacketCarStatusData.header.playerCarIndex];
+    }
+
+    private void UdpListener_SessionPacketReceived (object sender, SessionPacketReceivedEventArgs e) {
+        //Debug.Log ("Session packet received");
     }
 
     //ideally we wouldn't put all these calls in update, but unity doesn't like updates to the UI from other threads so we have to do this in an update function
     void Update () {
-        if (ready) {
+        try {
+            available.value = available.maxValue - c.ersDeployedThisLap;
+            harvested.value = c.ersHarvestedThisLapMGUH + c.ersHarvestedThisLapMGUK;
+            //battery.value = c.ERSStoreEnergy;
+            deploy.text = c.ersDeployMode.ToString ();
+            //not working
+            if (maxERS == 0) {
+                maxERS = c.ersStoreEnergy * 4;
+                available.maxValue = c.ersStoreEnergy;
+                battery.maxValue = maxERS;
+                currentTotalBattery = maxERS;
+            }
+            if (maxHarvest == 0) {
+                harvested.maxValue = c.ersStoreEnergy;
+            }
+
+            //not working
+            currentTotalBattery = (currentTotalBattery - c.ersDeployedThisLap) + c.ersHarvestedThisLapMGUH + c.ersHarvestedThisLapMGUK;
+            battery.value = currentTotalBattery;
+
+            if (c.pitLimiterStatus == 1) {
+                pit.SetActive (true);
+            } else {
+                pit.SetActive (false);
+            }
+
+            //not working
+            uint bias = c.frontBrakeBias;
+            bb.text = bias.ToString () + "%";
+
+            //not working - changed
+            fuelMargin.text = c.fuelInTank.ToString ();
+            //not working
+            fuelModeText.text = c.fuelMix.ToString ();
+
+            //not working - changed
+            if (wear [0].activeSelf && c.tyresWear != null) {
+                flTW.text = c.tyresWear [2].ToString ();
+                frTW.text = c.tyresWear [3].ToString ();
+                rlTW.text = c.tyresWear [0].ToString ();
+                rrTW.text = c.tyresWear [1].ToString ();
+            }
+        } catch (Exception exception) {
+            //Debug.LogError (exception.Source);
+            throw (exception);
+        }
+
+        /*if (ready) {
             //working
             switch (c.DRSAllowed) {
                 case 0:
@@ -166,7 +228,7 @@ public class Telemetry : MonoBehaviour
                         break;
                 }
             } catch (Exception exception) {
-
+                Debug.LogError (exception.Source);
             }
             
             //working
@@ -197,12 +259,12 @@ public class Telemetry : MonoBehaviour
                     sc.SetActive (false);
                     break;
             }
+            
+            //differential-on is the value that players change in game, so we show that.
+            byte diffON = cs.OnThrottle;
+            diff.text = diffON.ToString () + "%";
 
             try {
-                //differential-on is the value that players change in game, so we show that.
-                byte diffON = cs.OnThrottle;
-                diff.text = diffON.ToString () + "%";
-
                 available.value = available.maxValue - c.ERSDeployedThisLap;
                 harvested.value = c.ERSHarvestedThisLapMGUH + c.ERSHarvestedThisLapMGUK;
                 //battery.value = c.ERSStoreEnergy;
@@ -299,9 +361,10 @@ public class Telemetry : MonoBehaviour
                         break;
                 }
             } catch (Exception exception) {
-
+                //Debug.LogError (exception.Source);
+                throw (exception);
             }
-        }
+        }*/
     }
 
     public string GetLocalIP () {
@@ -314,13 +377,13 @@ public class Telemetry : MonoBehaviour
         throw new Exception ("No network adapters with an IPv4 address");
     }
 
-    void Tm_CarSetupPacketReceived (object sender, PacketReceivedEventArgs<PacketCarSetupData> e) {
+    /*void Tm_CarSetupPacketReceived (object sender, PacketReceivedEventArgs<PacketCarSetupData> e) {
         cs = e.Packet.CarSetups [e.Packet.Header.PlayerCarIndex];
         Debug.Log ("setup packet");
     }
 
     void F1Manager_CarStatusReceived (object sender, PacketReceivedEventArgs<PacketCarStatusData> e) {
-        //c = e.Packet.GetPlayerLapData ();
+        c = e.Packet.GetPlayerLapData ();
 
         Debug.Log ("status packet done");
     }
@@ -338,7 +401,7 @@ public class Telemetry : MonoBehaviour
     void F1Manager_SessionPacketReceived (object sender, PacketReceivedEventArgs<PacketSessionData> e) {
         psd = e.Packet;
         Debug.Log ("session packet");
-    }
+    }*/
 
     public void ToggleTyres () {
         foreach (GameObject g in temps) {
