@@ -46,7 +46,7 @@ public class UdpListener
                 PacketHeader header = new PacketHeader ();
                 header = FromArrayToStruct<PacketHeader> (bytes);
                 PacketID id = (PacketID) header.packetId;
-                Debug.Log (id);
+                
                 switch (id) {
                     case PacketID.Motion:
                         var motionPacket = FromArrayToStruct<CarMotionData> (bytes);
